@@ -5,14 +5,14 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.hardware.SensorManager
 import android.media.AudioManager
 import android.media.MediaActionSound
-import android.provider.MediaStore
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.*
@@ -32,7 +32,9 @@ import com.facebook.react.bridge.WritableMap
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.events.RCTEventEmitter
 import com.rncamerakit.barcode.BarcodeFrame
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -281,13 +283,13 @@ class CKCamera(context: ThemedReactContext) : FrameLayout(context), LifecycleObs
 
     fun capture(options: Map<String, Any>, promise: Promise) {
         // Create output options object which contains file + metadata
-        val contentValues = ContentValues().apply {
+        /*val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, "IMG_" + System.currentTimeMillis())
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpg")
-        }
+        }*/
 
         // Create the output file option to store the captured image in MediaStore
-        val outputOptions = when (outputPath) {
+        /*val outputOptions = when (outputPath) {
             null -> ImageCapture.OutputFileOptions
                     .Builder(
                             context.contentResolver,
@@ -298,7 +300,15 @@ class CKCamera(context: ThemedReactContext) : FrameLayout(context), LifecycleObs
             else -> ImageCapture.OutputFileOptions
                     .Builder(File(outputPath))
                     .build()
-        }
+        }*/
+
+        val outputFileName = "IMG_" + System.currentTimeMillis() + "_tmp.jpg";
+        val outputFileNameScaled = "IMG_" + System.currentTimeMillis() + ".jpg";
+        val outputFile = File(currentContext.cacheDir,outputFileName);
+
+        val outputOptions = ImageCapture.OutputFileOptions
+                .Builder(outputFile)
+                .build()
 
         flashViewFinder()
 
@@ -318,17 +328,42 @@ class CKCamera(context: ThemedReactContext) : FrameLayout(context), LifecycleObs
 
             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                 try {
-                    val savedUri = output.savedUri.toString()
+                    val b: Bitmap = BitmapFactory.decodeFile(outputFile.path)
+                    val origWidth: Int = b.getWidth()
+                    val origHeight: Int = b.getHeight()
+
+                    val destWidth = 600 //or the width you need
+
+                    // picture is wider than we want it, we calculate its target height
+                    val destHeight = origHeight / (origWidth / destWidth)
+                    // we create an scaled bitmap so it reduces the image, not just trim it
+                    val b2: Bitmap = Bitmap.createScaledBitmap(b, destWidth, destHeight, false)
+                    val outStream = ByteArrayOutputStream()
+                    // compress to the format you want, JPEG, PNG...
+                    // 70 is the 0-100 quality percentage
+                    b2.compress(Bitmap.CompressFormat.JPEG, 70, outStream)
+                    // we save the file, at least until we have made use of it
+                    val outputFileScaled = File(currentContext.cacheDir,outputFileNameScaled)
+                    outputFileScaled.createNewFile()
+                    //write the bytes in file
+                    val fo = FileOutputStream(outputFileScaled)
+                    fo.write(outStream.toByteArray())
+                    // remember close de FileOutput
+                    fo.close()
+
+                    val savedUri = outputFileScaled.toURI().toString()
                     onPictureTaken(savedUri)
                     Log.d(TAG, "CameraView: Photo capture succeeded: $savedUri")
 
                     val imageInfo = Arguments.createMap()
                     imageInfo.putString("uri", savedUri)
-                    imageInfo.putString("id", output.savedUri?.path)
-                    imageInfo.putString("name", output.savedUri?.lastPathSegment)
+                    imageInfo.putString("id", outputFileScaled.path)
+                    imageInfo.putString("name", outputFileNameScaled)
                     imageInfo.putInt("width", width)
                     imageInfo.putInt("height", height)
-                    imageInfo.putString("path", output.savedUri?.path)
+                    imageInfo.putString("path", outputFileScaled.path)
+
+                    outputFile.delete()
 
                     promise.resolve(imageInfo)
                 } catch (ex: Exception) {
